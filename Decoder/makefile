@@ -3,8 +3,8 @@ CXXFLAGS = -Wall -Wextra -Werror
 
 all: decoder
 
-decoder: Decoder.cpp
-	$(CXX) $(CXXFLAGS) -o decoder Decoder.cpp
+decoder: Decoder.cpp jpeg_data.cpp
+	$(CXX) $(CXXFLAGS) -o decoder Decoder.cpp jpeg_data.cpp
 
 run: decoder
 	./decoder
