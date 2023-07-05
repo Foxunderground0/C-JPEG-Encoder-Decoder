@@ -5,7 +5,7 @@
 #ifndef IMG_DATA_HEADER
 #define IMG_DATA_HEADER
 
-const int IMG_data_len = 395;
+const int IMG_data_len = 614236; //395;
 
 //extern const unsigned int IMG_data_len;
 extern std::array <uint8_t, IMG_data_len> IMG_data;
