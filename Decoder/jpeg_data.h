@@ -2,8 +2,8 @@
 #include <cstdlib>
 #include <cstdint>
 
-#ifndef IMG_DATA
-#define IMG_DATA
+#ifndef IMG_DATA_HEADER
+#define IMG_DATA_HEADER
 
 const int IMG_data_len = 395;
 

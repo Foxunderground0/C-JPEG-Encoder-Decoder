@@ -21,12 +21,22 @@ bool check_if_valid_img(std::array<uint8_t, IMG_data_len>& arr) {
 	return 1;
 }
 
-tuple<unsigned int, uint16_t, unsigned char> find_quantization_table_position_info(std::array<unsigned char, IMG_data_len>& arr, uint16_t byte, unsigned int instance = 0) {
+uint8_t count_instances(std::array<uint8_t, IMG_data_len>& arr, uint16_t data) {
+	uint8_t instance_counter = 0;
+	for (unsigned int i = 0; i < arr.size(); i++) {
+		if (arr.at(i) == (data >> 8) && arr.at(i + 1) == (data & 0xff)) {
+			instance_counter++;
+		}
+	}
+	return instance_counter;
+}
+
+tuple<uint8_t, uint16_t, uint8_t> find_quantization_table_position_info(std::array<unsigned char, IMG_data_len>& arr, unsigned int instance = 0) {
 	unsigned int instance_counter = 0;
 	for (unsigned int i = 0; i < arr.size(); i++) {
-		if (arr.at(i) == (byte >> 8) && arr.at(i + 1) == (byte & 0xff)) {
+		if (arr.at(i) == (0xffdb >> 8) && arr.at(i + 1) == (0xffdb & 0xff)) {
 			if (instance_counter >= instance) {
-				return { i, arr.at(i + 2) << 8 | arr.at(i + 3), arr.at(i + 4) }; // index, length, destination
+				return { i + 2, arr.at(i + 2) << 8 | arr.at(i + 3), arr.at(i + 4) }; // index immedeately after tag, length, destination (luma or chroma)
 			}
 			instance_counter++;
 		}
@@ -40,14 +50,32 @@ int main(void) {
 	print("Size: " << IMG_data.size() << " bytes");
 	print("Parsing");
 
-	if (!check_if_valid_img(IMG_data)) {
-		auto data = find_quantization_table_position_info(IMG_data, 0xffc4, 1);
-		print(get<0>(data));
-		print(get<1>(data));
-		print(get<2>(data));
-	} else {
-		print("Not a valid JPEG immage")
+	if (check_if_valid_img(IMG_data)) {
+		print("Not a valid JPEG immage");
+		return 1;
 	}
+
+	uint8_t num_of_quantization_tables = count_instances(IMG_data, 0xffdb);
+	print("Number of Quantization tables found: " << static_cast<int>(num_of_quantization_tables));
+
+	if (num_of_quantization_tables <= 0) {
+		print("No Quantization tables found");
+		return 1;
+	}
+
+	for (uint8_t i = 0; i < num_of_quantization_tables; i++) {
+		print("Table number: " << static_cast<int>(i));
+		auto data = find_quantization_table_position_info(IMG_data, i);
+		print("Index: " << static_cast<int>(get<0>(data)));
+		print("Length: " << get<1>(data));
+		print("Destination: " << static_cast<int>(get<2>(data)));
+		print("Table contents below:");
+
+		for (uint16_t i = get<0>(data) + 3; i < get<0>(data) + get<1>(data); i++) { // Loop over the quantization tables contents
+			print(static_cast<int>(i - (get<0>(data) + 3)) << ": " << static_cast<int>(IMG_data.at(i)));
+		}
+	}
+
 	return 0;
 }
 
