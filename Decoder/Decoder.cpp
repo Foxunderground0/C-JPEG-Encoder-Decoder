@@ -9,8 +9,8 @@
 
 using namespace std;
 
-vector < vector<uint8_t> > quantization_tables;
-vector< vector<uint8_t> > huffman_tables;
+vector<vector<uint8_t>> quantization_tables;
+vector<vector<vector<uint8_t>>> huffman_tables;
 
 bool check_if_valid_img(std::array<uint8_t, IMG_data_len>& arr) {
 	if (arr.at(0) == 0xff && arr.at(1) == 0xd8) {
@@ -59,6 +59,19 @@ tuple<uint64_t, uint16_t, uint8_t, uint8_t> find_huffman_table_position_info(std
 	}
 	return { -1, -1 , -1, -1 };
 }
+
+struct HuffmanNode {
+	char data; // One of the input characters
+	int freq; // Frequency of the character
+	HuffmanNode* left, * right; // Left and right child
+
+	HuffmanNode(char data, int freq)
+	{
+		left = right = NULL;
+		this->data = data;
+		this->freq = freq;
+	}
+};
 
 int main(void) {
 
@@ -126,28 +139,68 @@ int main(void) {
 		print("Destination: " << static_cast<int>(get<3>(data)));
 		print("Huffman table contents below:");
 		uint16_t elements_count = 0;
-		bool mode = 0;
-		for (uint16_t i = get<0>(data) + 3; i < get<0>(data) + get<1>(data); i++) { // Loop over the Huffman tables contents
-			if (mode == 0) {
-				if ((i - (get<0>(data) + 3)) < 16) {
-					cout << static_cast<int>(IMG_data.at(i)) << " ";
-					elements_count += static_cast<int>(IMG_data.at(i));
-				} else {
-					mode = 1;
-					cout << endl;
-					cout << static_cast<int>(IMG_data.at(i)) << " ";
-				}
-			} else {
-				cout << static_cast<int>(IMG_data.at(i)) << " ";
-			}
 
+		vector<uint8_t> length;
+		vector<uint8_t> elements;
+
+		for (uint16_t i = get<0>(data) + 3; i < get<0>(data) + get<1>(data); i++) { // Loop over the Huffman tables contents
+
+			if ((i - (get<0>(data) + 3)) < 16) {
+				//cout << static_cast<int>(IMG_data.at(i)) << " ";
+				elements_count += static_cast<int>(IMG_data.at(i));
+				length.push_back(IMG_data.at(i));
+			} else {
+				//cout << static_cast<int>(IMG_data.at(i)) << " ";
+				elements.push_back(IMG_data.at(i));
+			}
 		}
+
 		cout << endl;
 		print("Number of elements: " << static_cast<int>(elements_count));
 		cout << endl;
 
+		//combine the length and elements
+		vector<vector<uint8_t>> huffman_table_length_elements_combined;
+		uint8_t elements_index = 0;
+		for (uint8_t i = 0; i <= 16; i++) { // loop over the 16 elements in vector length
+			if (length[i] > 0) {
+			}
+			while (length[i] > 0) {
+				vector<uint8_t> combined;
+				combined.push_back(i);
+				combined.push_back(elements[elements_index]);
+				huffman_table_length_elements_combined.push_back(combined);
+				length[i]--;
+				elements_index++;
+				elements_count--;
+			}
+
+		}
+
+		if (elements_count != 0) {
+			print("Error while combining length and elements");
+			return 1;
+		}
+
+		huffman_tables.push_back(huffman_table_length_elements_combined);
 
 	}
+
+	for (uint16_t i = 0; i < huffman_tables.size(); ++i) {
+		print("Huffman table " << static_cast<int>(i) << " contents below:");
+		for (uint16_t j = 0; j < huffman_tables[i].size(); ++j) {
+			for (uint16_t k = 0; k < huffman_tables[i][j].size(); ++k) {
+				std::cout << static_cast<int>(huffman_tables[i][j][k]) << " ";
+			}
+			cout << endl;
+		}
+		cout << endl;
+	}
+
+	//Create huffman tree
+
+
+	cout << endl;
 
 	return 0;
 }
