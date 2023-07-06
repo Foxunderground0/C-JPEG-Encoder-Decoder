@@ -10,7 +10,7 @@
 using namespace std;
 
 vector < vector<uint8_t> > quantization_tables;
-vector<uint8_t> huffman_tables;
+vector< vector<uint8_t> > huffman_tables;
 
 bool check_if_valid_img(std::array<uint8_t, IMG_data_len>& arr) {
 	if (arr.at(0) == 0xff && arr.at(1) == 0xd8) {
@@ -47,7 +47,7 @@ tuple<uint8_t, uint16_t, uint8_t> find_quantization_table_position_info(std::arr
 	return { -1, -1 , -1 };
 }
 
-tuple<uint8_t, uint16_t, uint8_t, uint8_t> find_huffman_table_position_info(std::array<unsigned char, IMG_data_len>& arr, unsigned int instance = 0) {
+tuple<uint64_t, uint16_t, uint8_t, uint8_t> find_huffman_table_position_info(std::array<unsigned char, IMG_data_len>& arr, unsigned int instance = 0) {
 	unsigned int instance_counter = 0;
 	for (unsigned int i = 0; i < arr.size(); i++) {
 		if (arr.at(i) == (0xffc4 >> 8) && arr.at(i + 1) == (0xffc4 & 0xff)) {
@@ -87,7 +87,6 @@ int main(void) {
 		print("Index: " << static_cast<int>(get<0>(data)));
 		print("Length: " << get<1>(data));
 		print("Destination: " << static_cast<int>(get<2>(data)));
-
 
 		vector<uint8_t> quantization_table_values;
 		for (uint16_t i = get<0>(data) + 3; i < get<0>(data) + get<1>(data); i++) { // Loop over the quantization tables contents
@@ -129,7 +128,6 @@ int main(void) {
 		uint16_t elements_count = 0;
 		bool mode = 0;
 		for (uint16_t i = get<0>(data) + 3; i < get<0>(data) + get<1>(data); i++) { // Loop over the Huffman tables contents
-			//print(static_cast<int>(i - (get<0>(data) + 3)) << ": " << static_cast<int>(IMG_data.at(i)));
 			if (mode == 0) {
 				if ((i - (get<0>(data) + 3)) < 16) {
 					cout << static_cast<int>(IMG_data.at(i)) << " ";
