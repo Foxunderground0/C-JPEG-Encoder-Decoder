@@ -13,21 +13,9 @@
 
 using namespace std;
 
-struct huffman_node {
-	uint16_t frequency; // Frequency of the character
-	uint16_t data; // One of the input characters
-	huffman_node* left, * right; // Left and right child
-
-	huffman_node(uint8_t frequency, uint16_t data)
-	{
-		this->frequency = frequency;
-		this->data = data;
-		left = right = NULL;
-	}
-};
 
 vector<vector<uint8_t>> quantization_tables;
-vector<vector<struct huffman_node>> huffman_tables;
+vector<unordered_map<uint16_t, tuple<uint8_t, uint8_t>>> huffman_tables;
 
 bool check_if_valid_img(std::array<uint8_t, IMG_data_len>& arr) {
 	if (arr.at(0) == 0xff && arr.at(1) == 0xd8) {
@@ -76,20 +64,6 @@ tuple<uint64_t, uint16_t, uint8_t, uint8_t> find_huffman_table_position_info(std
 	}
 	return { -1, -1 , -1, -1 };
 }
-
-struct compare_huffman_nodes {
-	bool operator()(struct huffman_node& n1, struct huffman_node& n2) {
-		if (n1.frequency == n2.frequency) {
-			if (n1.data == 0xffff) {
-				if (n2.data == 0xffff) {
-					return 1;  // Change the comparison as per your requirement
-				}
-			}
-			return n1.data > n2.data;  // Change the comparison as per your requirement
-		}
-		return n1.frequency > n2.frequency;
-	}
-};
 
 int main(void) {
 
@@ -158,7 +132,6 @@ int main(void) {
 		print("Huffman table contents below:");
 		uint16_t elements_count = 0;
 
-		priority_queue<struct huffman_node, vector<huffman_node>, compare_huffman_nodes> huffman_queue;
 		vector<uint8_t> length;
 		vector<uint8_t> elements;
 		unordered_map<uint16_t, tuple<uint8_t, uint8_t>> huffman_codes_map; // Code, Data, Code Length
@@ -178,28 +151,20 @@ int main(void) {
 		print("Number of elements: " << static_cast<int>(elements_count));
 		cout << endl;
 
-		//combine the length and elements
-		vector<struct huffman_node> huffman_table_length_elements_combined;
-
+		//Get the codes using canonical huffman encoding and store them in a hashmap
 		uint8_t elements_index = 0;
 		uint16_t code = 0x00;
 		uint16_t elements_count_copy = elements_count;
-		for (uint8_t i = 0; i <= 16; i++) { // loop over the 16 elements in vector length
+		for (uint8_t i = 0; i < 16; i++) { //loop over the 16 elements in vector length
 			while (length[i] > 0) {
-				struct huffman_node combined(i, elements[elements_index]);
-				huffman_table_length_elements_combined.push_back(combined);
-				huffman_queue.push(combined);
-				huffman_codes_map[code] = make_tuple(elements_index, i + 1);
-				print(static_cast<int>(i) << " " << static_cast<int>(elements[elements_index]));
+				huffman_codes_map[code] = make_tuple(elements[elements_index], i + 1);
+				print(static_cast<int>(i + 1) << " " << static_cast<int>(elements[elements_index]));
 				code = code + 1;
 				length[i]--;
 				elements_index++;
 				elements_count--;
 			}
 			code = code << 1;
-			if (elements_count == 0) {
-				break;
-			}
 		}
 
 		if (elements_count != 0) {
@@ -211,60 +176,14 @@ int main(void) {
 			print("Map size dosent match the number of elements");
 			return 1;
 		}
-		/*
 
-		struct huffman_node combined(1, 5);
-		huffman_queue.push(combined);
-		struct huffman_node combined1(1, 6);
-		huffman_queue.push(combined1);
-		struct huffman_node combined2(1, 7);
-		huffman_queue.push(combined2);
-		struct huffman_node combined3(1, 8);
-		huffman_queue.push(combined3);
-
-
-		huffman_tables.push_back(huffman_table_length_elements_combined);
-
-		//Create huffman tree
-		while (huffman_queue.size() != 1) {
-			// Get the pointers to top 2
-			struct huffman_node* n1 = new huffman_node(huffman_queue.top());
-			huffman_queue.pop();
-			struct huffman_node* n2 = new huffman_node(huffman_queue.top());
-			huffman_queue.pop();
-
-			//Create Root Node
-			struct huffman_node root_node(n1->frequency + n2->frequency, 0xffff);
-			print(compare_huffman_nodes()(*n1, *n2));
-
-			//Set the nodes
-			if (compare_huffman_nodes()(*n1, *n2) == 0) {
-				root_node.left = n1;
-				root_node.right = n2;
-			} else {
-				root_node.left = n2;
-				root_node.right = n1;
-			}
-			root_node.data = 0xffff;
-			huffman_queue.push(root_node);
-			//break;
-		}
-		*/
+		//Ouptput the generated codes
 		for (const auto& pair : huffman_codes_map) {
 			std::cout << "Key: " << bitset<16>(pair.first) << ", Value: " << static_cast<int>(get<0>(pair.second)) << ", Length: " << static_cast<int>(get<1>(pair.second)) << std::endl;
 		}
-		//break; // Remove
-	}
-	return 0;
 
-	for (uint16_t i = 0; i < huffman_tables.size(); ++i) {
-		print("Huffman table " << static_cast<int>(i) << " contents below:");
-		for (uint16_t j = 0; j < huffman_tables[i].size(); ++j) {
-			std::cout << static_cast<int>(huffman_tables[i][j].frequency) << " " << static_cast<int>(huffman_tables[i][j].data) << endl;
-		}
-		cout << endl;
+		huffman_tables.push_back(huffman_codes_map);
 	}
-
 
 	return 0;
 }
