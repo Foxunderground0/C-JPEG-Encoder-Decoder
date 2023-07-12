@@ -18,7 +18,10 @@ vector<vector<uint8_t>> quantization_tables;
 vector<unordered_map<uint16_t, tuple<uint8_t, uint8_t>>> huffman_tables;
 int8_t bit_index = 7;
 uint64_t byte_index = 0;
-
+struct img_header{
+	uint16_t height;
+	uint16_t width;
+}
 uint8_t get_next_bit_from_stream(std::array<uint8_t, IMG_data_len>& arr) {
 	uint8_t bit = 0;
 	bit = arr.at(byte_index);
