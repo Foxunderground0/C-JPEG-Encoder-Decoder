@@ -5,7 +5,7 @@
 #ifndef IMG_DATA_HEADER
 #define IMG_DATA_HEADER
 
-const int img_data_len = 395;// 614236
+const int img_data_len = 395; // 614236;
 
 const uint8_t zigZagMap[] = {
     0,   1,  8, 16,  9,  2,  3, 10,

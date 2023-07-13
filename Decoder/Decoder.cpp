@@ -19,19 +19,24 @@ vector<unordered_map<uint16_t, tuple<uint8_t, uint8_t>>> huffman_tables;
 int8_t bit_index = 7;
 uint64_t byte_index = 0;
 
-struct components_info{
-	uint8_t component_id = 0;
-	uint8_t	component_height_subsampling = 0;
-	uint8_t component_width_subsampling = 0;
-	uint8_t component_destination = 0;
-	
+struct mcu_container {
+	uint8_t values[64] = { 0 };
 };
 
-struct img_header_info{
+struct components_info {
+	uint8_t component_id = 0;
+	uint8_t component_width_subsampling = 0;
+	uint8_t	component_height_subsampling = 0;
+	uint8_t component_destination = 0;
+
+};
+
+struct img_header_info {
 	uint16_t height = 0;
 	uint16_t width = 0;
 	uint8_t number_of_components = 0;
-	vector<*components_info> components_info_vector; //component number, width subsampling, height subsampling, destination
+	vector<struct components_info*> components_info_vector; //component number, width subsampling, height subsampling, destination
+	vector<struct mcu_container*> mcu_array;
 };
 
 
@@ -49,9 +54,9 @@ uint8_t get_next_bit_from_stream(std::array<uint8_t, img_data_len>& arr) {
 }
 
 bool check_if_valid_img(std::array<uint8_t, img_data_len>& arr) {
-	if (((arr.at(0) << 8) | arr.at(1)) == ((0xff<<8) | SOI )) {
+	if (((arr.at(0) << 8) | arr.at(1)) == ((0xff << 8) | SOI)) {
 		print("JPEG header found")
-			if (((arr.at(arr.size() - 2) << 8) | arr.at(arr.size() - 1)) == ((0xff<<8) | EOI )) {
+			if (((arr.at(arr.size() - 2) << 8) | arr.at(arr.size() - 1)) == ((0xff << 8) | EOI)) {
 				print("JPEG end found")
 					return 0;
 			}
@@ -97,21 +102,35 @@ tuple<uint64_t, uint16_t, uint8_t, uint8_t> find_huffman_table_position_info(std
 
 img_header_info* find_start_of_frame_info(std::array<unsigned char, img_data_len>& arr) {
 	for (unsigned int i = 0; i < arr.size(); i++) { // Parse file
-		if (((arr.at(i) << 8) | arr.at(i + 1)) == ((0xff<<8) | SOF0 ) && arr.at(i + 4) == (0x08)) { // Check if header is found and the image is of 8 bit per channel color depth
+		if (((arr.at(i) << 8) | arr.at(i + 1)) == ((0xff << 8) | SOF0) && arr.at(i + 4) == (0x08)) { // Check if header is found and the image is of 8 bit per channel color depth
 			img_header_info* pointer = new img_header_info;
 			pointer->height = arr.at(i + 5) << 8 | arr.at(i + 6);
 			pointer->width = arr.at(i + 7) << 8 | arr.at(i + 8);
 			pointer->number_of_components = arr.at(i + 9);
-			i = i+10; // Set the index to the start of components
-			for(uint8_t j = 0; j< number_of_components; j++){
+			i = i + 10; // Set the index to the start of components
+
+			// Fill in component info
+			for (uint8_t j = 1; j <= pointer->number_of_components; j++) {
 				components_info* component_pointer = new components_info;
-				component_pointer->component_id = arr.at(i); // TODO
-				component_pointer->component_height_subsampling = arr.at(i);
-				component_pointer->component_width_subsampling = arr.at(i);
-				component_pointer->component_destination = arr.at(i);
-				
+				component_pointer->component_id = arr.at(i);
+				component_pointer->component_width_subsampling = arr.at(i + 1) >> 4;
+				component_pointer->component_height_subsampling = arr.at(i + 1) & 0x0f;
+				component_pointer->component_destination = arr.at(i + 2);
+				pointer->components_info_vector.push_back(component_pointer);
+				i += 3;
 			}
-			//, arr.at(i + 7) << 8 | arr.at(i + 8);
+
+			// Create MCU Array
+			if (((pointer->height * pointer->width) / 64) > 0xFFFFFFFFFFFFFFFF) {
+				print("Too many mcus to keep track of in a uint64");
+				return nullptr;
+			}
+
+			for (uint64_t j = 0; j < (pointer->height * pointer->width) / 64; j++) {
+				mcu_container* mcu_pointer = new mcu_container;
+				pointer->mcu_array.push_back(mcu_pointer);
+			}
+
 			return pointer;
 		}
 	}
@@ -144,17 +163,27 @@ int main(void) {
 		print("Not a valid JPEG immage");
 		return 1;
 	}
-	
+
 	//Get Frame Height, Width, and info on huffman tables;
 	auto frame_info = find_start_of_frame_info(img_data);
 
-	if(frame_info == nullptr){
+	if (frame_info == nullptr) {
 		print("Error making frame_info struct");
 		return 1;
 	}
 
 	print("Frame Height: " << static_cast<int>(frame_info->height));
 	print("Frame Width: " << static_cast<int>(frame_info->width));
+	print("Number of components: " << static_cast<int>(frame_info->components_info_vector.size()));
+
+	for (uint8_t i = 0; i < (uint8_t)frame_info->components_info_vector.size(); i++) {
+		print("Component info: " << static_cast<int>(frame_info->components_info_vector[i]->component_id) << " "
+			<< static_cast<int>(frame_info->components_info_vector[i]->component_width_subsampling) << " "
+			<< static_cast<int>(frame_info->components_info_vector[i]->component_height_subsampling) << " "
+			<< static_cast<int>(frame_info->components_info_vector[i]->component_destination));
+	}
+
+	print("Number of MCUs: " << static_cast<int>(frame_info->mcu_array.size()));
 
 	/*
 	//Get Quantization Tables
