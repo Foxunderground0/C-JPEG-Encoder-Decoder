@@ -268,9 +268,8 @@ img_info* get_huffman_tables(std::array<unsigned char, img_data_len>& arr, img_i
 		huffman_tables.push_back(huffman_codes_map);
 		*/
 		//	cout << endl;
+		return img_info_pointer;
 	}
-	print(arr.at(1));
-	print(img_info_pointer);
 	return nullptr;
 }
 
@@ -304,12 +303,13 @@ int main(void) {
 	//Get Frame Height, Width, and set up other relevent info on huffman tables;
 	auto img_info = get_frame_info(img_data);
 
+	if (img_info == nullptr) {
+		print("Error making frame_info struct");
+		return 1;
+	}
+
 	//Debuging
 	{
-		if (img_info == nullptr) {
-			print("Error making frame_info struct");
-			return 1;
-		}
 
 		print("Frame Height: " << static_cast<int>(img_info->height));
 		print("Frame Width: " << static_cast<int>(img_info->width));
@@ -328,6 +328,27 @@ int main(void) {
 	//Get Huffman Tables
 	img_info = get_huffman_tables(img_data, img_info);
 
+	if (img_info == nullptr) {
+		print("Error adding huffman tables");
+		return 1;
+	}
+
+	//Debuging TODO CLEAN UP REDUNDANT COUTS
+	{
+
+		for (uint8_t i = 0; i < (uint8_t)img_info->huffman_vector.size(); i++) {
+			print("Frame Height: " << static_cast<int>(img_info->height));
+			print("Frame Width: " << static_cast<int>(img_info->width));
+			print("Number of components: " << static_cast<int>(img_info->components_info_vector.size()));
+
+			//Ouptput the generated codes
+			for (const auto& pair : img_info->huffman_vector[i]->huffman_hashmap) {
+				std::cout << "Key: " << bitset<16>(pair.first) << ", Value: " << static_cast<int>(pair.second) << std::endl;
+			}
+		}
+
+		print("Number of Huffman tables: " << static_cast<int>(img_info->huffman_vector.size()));
+	}
 	/*
 	uint8_t num_of_huffman_tables = count_instances(img_data, 0xffc4);
 	print("Number of Huffman tables found: " << static_cast<int>(num_of_huffman_tables));
