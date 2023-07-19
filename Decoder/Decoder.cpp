@@ -121,7 +121,7 @@ img_info* get_frame_info(std::array<unsigned char, img_data_len>& arr) {
 			// Fill in component info
 			for (uint8_t j = 1; j <= img_info_pointer->number_of_components; j++) {
 				components_info_container* component_pointer = new components_info_container;
-				component_pointer->component_id = arr.at(i);
+				component_pointer->component_id = arr.at(i) - 1;
 				component_pointer->component_width_subsampling = arr.at(i + 1) >> 4;
 				component_pointer->component_height_subsampling = arr.at(i + 1) & 0x0f;
 				component_pointer->component_destination = arr.at(i + 2);
@@ -153,7 +153,7 @@ img_info* get_huffman_tables(std::array<unsigned char, img_data_len>& arr, img_i
 		print("No Huffman tables found");
 		return nullptr;
 	} else {
-		print("Number of Huffman tables found: " << static_cast<int>(num_of_huffman_tables));
+		//print("Number of Huffman tables found: " << static_cast<int>(num_of_huffman_tables));
 		uint8_t instance_counter = 0;
 		for (unsigned int i = 0; i < arr.size() - 1; i++) {
 			if (((arr.at(i) << 8) | arr.at(i + 1)) == (0xff << 8 | DHT)) { // Loop over each huffman table
@@ -170,15 +170,13 @@ img_info* get_huffman_tables(std::array<unsigned char, img_data_len>& arr, img_i
 				print("Table " << (int)instance_counter + 1 << ":");
 				for (uint16_t j = i + 5; j < 2 + i + length; j++) { // Loop over the Huffman tables contents
 					if ((j - (i + 4)) < 16) {
-						cout << static_cast<int>(img_data.at(j)) << " ";
 						elements_count += static_cast<int>(img_data.at(j));
 						code_length.push_back(img_data.at(j));
 					} else {
-						cout << static_cast<int>(img_data.at(j)) << " ";
 						elements.push_back(img_data.at(j));
 					}
 				}
-				cout << endl << (int)elements_count << endl;
+				//cout << endl << (int)elements_count << endl;
 				instance_counter++;
 
 
@@ -188,7 +186,6 @@ img_info* get_huffman_tables(std::array<unsigned char, img_data_len>& arr, img_i
 				for (uint8_t j = 0; j < 16; j++) { //loop over the 16 elements in vector length
 					while (code_length[j] > 0) {
 						huffman_hashmap_container_pointer->huffman_hashmap[code] = elements[elements_index];
-						print(bitset<16>(static_cast<int>(code)) << " " << static_cast<int>(elements[elements_index]) << " " << static_cast<int>(j + 1));
 						code = code + 1;
 						code_length[j]--;
 						elements_index++;
@@ -206,68 +203,6 @@ img_info* get_huffman_tables(std::array<unsigned char, img_data_len>& arr, img_i
 				img_info_pointer->huffman_vector.push_back(huffman_hashmap_container_pointer);
 			}
 		}
-
-		/*
-		auto data = find_huffman_table_position_info(img_data, i);
-		print("Index: " << static_cast<int>(get<0>(data)));
-		print("Length: " << get<1>(data));
-		print("Class: " << static_cast<int>(get<2>(data)));
-		print("Destination: " << static_cast<int>(get<3>(data)));
-		print("Huffman table contents below:");
-		uint16_t elements_count = 0;
-
-		vector<uint8_t> length;
-		vector<uint8_t> elements;
-		unordered_map<uint16_t, tuple<uint8_t, uint8_t>> huffman_codes_map; // Code, Data, Code Length
-
-		for (uint16_t i = get<0>(data) + 3; i < get<0>(data) + get<1>(data); i++) { // Loop over the Huffman tables contents
-			if ((i - (get<0>(data) + 3)) < 16) {
-				cout << static_cast<int>(img_data.at(i)) << " ";
-				elements_count += static_cast<int>(img_data.at(i));
-				length.push_back(img_data.at(i));
-			} else {
-				cout << static_cast<int>(img_data.at(i)) << " ";
-				elements.push_back(img_data.at(i));
-			}
-		}
-
-		cout << endl;
-		print("Number of elements: " << static_cast<int>(elements_count));
-		cout << endl;
-
-		//Get the codes using canonical huffman encoding and store them in a hashmap
-		uint8_t elements_index = 0;
-		uint16_t code = 0x00;
-		uint16_t elements_count_copy = elements_count;
-		for (uint8_t i = 0; i < 16; i++) { //loop over the 16 elements in vector length
-			while (length[i] > 0) {
-				huffman_codes_map[code] = make_tuple(elements[elements_index], i + 1);
-				print(static_cast<int>(i + 1) << " " << static_cast<int>(elements[elements_index]));
-				code = code + 1;
-				length[i]--;
-				elements_index++;
-				elements_count--;
-			}
-			code = code << 1;
-		}
-
-		if (elements_count != 0) {
-			print("Error while combining length and elements");
-			return 1;
-		}
-
-		if (elements_count_copy != huffman_codes_map.size()) {
-			print("Map size dosent match the number of elements");
-			return 1;
-		}
-
-		//Ouptput the generated codes
-		for (const auto& pair : huffman_codes_map) {
-			std::cout << "Key: " << bitset<16>(pair.first) << ", Value: " << static_cast<int>(get<0>(pair.second)) << ", Length: " << static_cast<int>(get<1>(pair.second)) << std::endl;
-		}
-		huffman_tables.push_back(huffman_codes_map);
-		*/
-		//	cout << endl;
 		return img_info_pointer;
 	}
 	return nullptr;
@@ -310,13 +245,12 @@ int main(void) {
 
 	//Debuging
 	{
-
 		print("Frame Height: " << static_cast<int>(img_info->height));
 		print("Frame Width: " << static_cast<int>(img_info->width));
 		print("Number of components: " << static_cast<int>(img_info->components_info_vector.size()));
 
 		for (uint8_t i = 0; i < (uint8_t)img_info->components_info_vector.size(); i++) {
-			print("Component info: " << static_cast<int>(img_info->components_info_vector[i]->component_id) << " "
+			print("Component info (id, width subsample, height subsample, destination): " << static_cast<int>(img_info->components_info_vector[i]->component_id) << " "
 				<< static_cast<int>(img_info->components_info_vector[i]->component_width_subsampling) << " "
 				<< static_cast<int>(img_info->components_info_vector[i]->component_height_subsampling) << " "
 				<< static_cast<int>(img_info->components_info_vector[i]->component_destination));
@@ -333,13 +267,13 @@ int main(void) {
 		return 1;
 	}
 
-	//Debuging TODO CLEAN UP REDUNDANT COUTS
+	//Debuging
 	{
-
+		print("Number of Huffman tables: " << static_cast<int>(img_info->huffman_vector.size()));
 		for (uint8_t i = 0; i < (uint8_t)img_info->huffman_vector.size(); i++) {
-			print("Frame Height: " << static_cast<int>(img_info->height));
-			print("Frame Width: " << static_cast<int>(img_info->width));
-			print("Number of components: " << static_cast<int>(img_info->components_info_vector.size()));
+			print("Table: " << static_cast<int>(i));
+			print("Huffman class: " << static_cast<int>(img_info->huffman_vector[i]->huffman_class));
+			print("Huffman destination: " << static_cast<int>(img_info->huffman_vector[i]->huffman_destination));
 
 			//Ouptput the generated codes
 			for (const auto& pair : img_info->huffman_vector[i]->huffman_hashmap) {
