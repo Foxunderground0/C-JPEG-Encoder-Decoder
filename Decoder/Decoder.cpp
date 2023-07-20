@@ -96,19 +96,6 @@ tuple<uint8_t, uint16_t, uint8_t> find_quantization_table_position_info(std::arr
 	return { -1, -1 , -1 };
 }
 
-tuple<uint64_t, uint16_t, uint8_t, uint8_t> find_huffman_table_position_info(std::array<unsigned char, img_data_len>& arr, unsigned int instance = 0) {
-	unsigned int instance_counter = 0;
-	for (unsigned int i = 0; i < arr.size(); i++) {
-		if (arr.at(i) == (0xffc4 >> 8) && arr.at(i + 1) == (0xffc4 & 0xff)) {
-			if (instance_counter >= instance) {
-				return { i + 2, arr.at(i + 2) << 8 | arr.at(i + 3), arr.at(i + 4) >> 4, arr.at(i + 4) & 0x0f }; // index immedeately after tag, length, class, destination (luma or chroma)
-			}
-			instance_counter++;
-		}
-	}
-	return { -1, -1 , -1, -1 };
-}
-
 img_info* get_frame_info(std::array<unsigned char, img_data_len>& arr) {
 	for (unsigned int i = 0; i < arr.size(); i++) { // Parse file
 		if (((arr.at(i) << 8) | arr.at(i + 1)) == ((0xff << 8) | SOF0) && arr.at(i + 4) == (0x08)) { // Check if header is found and the image is of 8 bit per channel color depth
@@ -217,11 +204,11 @@ uint64_t get_start_of_byte_stream(std::array<unsigned char, img_data_len>& arr) 
 	return -1;
 }
 
-uint8_t get_symbol_from_huffman_map(unordered_map<uint16_t, tuple<uint8_t, uint8_t>>& map, uint16_t& key) {
+uint8_t get_symbol_from_huffman_map(unordered_map<uint16_t, uint8_t>& map, uint16_t& key) {
 	if (map.find(key) == map.end())
 		return 0xff;
 
-	return get<0>(map[key]);
+	return map[key];
 }
 
 int main(void) {
@@ -275,14 +262,14 @@ int main(void) {
 			print("Huffman class: " << static_cast<int>(img_info->huffman_vector[i]->huffman_class));
 			print("Huffman destination: " << static_cast<int>(img_info->huffman_vector[i]->huffman_destination));
 
-			//Ouptput the generated codes
+			//Output the generated codes
 			for (const auto& pair : img_info->huffman_vector[i]->huffman_hashmap) {
 				std::cout << "Key: " << bitset<16>(pair.first) << ", Value: " << static_cast<int>(pair.second) << std::endl;
 			}
 		}
-
-		print("Number of Huffman tables: " << static_cast<int>(img_info->huffman_vector.size()));
 	}
+	uint16_t x = 0b0000000000000110;
+	print(static_cast<int>(get_symbol_from_huffman_map(img_info->huffman_vector[0]->huffman_hashmap, x)));
 	/*
 	uint8_t num_of_huffman_tables = count_instances(img_data, 0xffc4);
 	print("Number of Huffman tables found: " << static_cast<int>(num_of_huffman_tables));
