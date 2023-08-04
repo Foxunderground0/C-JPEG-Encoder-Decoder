@@ -13,7 +13,6 @@ using namespace std;
 
 #define print(x) cout << "[+] " << x << endl;
 
-
 vector<vector<uint8_t>> quantization_tables;
 //vector<int> huffman_tables;
 int8_t bit_index = 7;
@@ -30,6 +29,12 @@ struct components_info_container {
 	uint8_t component_destination = 0;
 };
 
+struct scan_components_info_and_order_container {
+	uint8_t mcu_order = 0;
+	uint8_t dc_table_id = 0;
+	uint8_t	ac_table_id = 0;
+};
+
 struct huffman_hashmap_container {
 	uint8_t huffman_class = 0;
 	uint8_t huffman_destination = 0;
@@ -42,12 +47,11 @@ struct img_info {
 
 	uint8_t number_of_components = 0;
 	vector<struct components_info_container*> components_info_vector; //component number, width subsampling, height subsampling, destination
-	vector<struct mcu_container*> mcu_vector;
+	vector<vector<struct mcu_container*>> mcu_vector;
 
 	vector<struct huffman_hashmap_container*> huffman_vector;
 
 };
-
 
 uint8_t get_next_bit_from_stream(std::array<uint8_t, img_data_len>& arr) {
 	uint8_t bit = 0;
@@ -75,7 +79,7 @@ bool check_if_valid_img(std::array<uint8_t, img_data_len>& arr) {
 
 uint8_t count_instances(std::array<uint8_t, img_data_len>& arr, uint16_t data) {
 	uint8_t instance_counter = 0;
-	for (unsigned int i = 0; i < arr.size(); i++) {
+	for (uint64_t i = 0; i < arr.size(); i++) {
 		if (arr.at(i) == (data >> 8) && arr.at(i + 1) == (data & 0xff)) {
 			instance_counter++;
 		}
@@ -85,7 +89,7 @@ uint8_t count_instances(std::array<uint8_t, img_data_len>& arr, uint16_t data) {
 
 tuple<uint8_t, uint16_t, uint8_t> find_quantization_table_position_info(std::array<unsigned char, img_data_len>& arr, unsigned int instance = 0) {
 	unsigned int instance_counter = 0;
-	for (unsigned int i = 0; i < arr.size(); i++) {
+	for (uint64_t i = 0; i < arr.size(); i++) {
 		if (arr.at(i) == (0xffdb >> 8) && arr.at(i + 1) == (0xffdb & 0xff)) {
 			if (instance_counter >= instance) {
 				return { i + 2, arr.at(i + 2) << 8 | arr.at(i + 3), arr.at(i + 4) }; // index immedeately after tag, length, destination (luma or chroma)
@@ -97,7 +101,7 @@ tuple<uint8_t, uint16_t, uint8_t> find_quantization_table_position_info(std::arr
 }
 
 img_info* get_frame_info(std::array<unsigned char, img_data_len>& arr) {
-	for (unsigned int i = 0; i < arr.size(); i++) { // Parse file
+	for (uint64_t i = 0; i < arr.size(); i++) { // Parse file
 		if (((arr.at(i) << 8) | arr.at(i + 1)) == ((0xff << 8) | SOF0) && arr.at(i + 4) == (0x08)) { // Check if header is found and the image is of 8 bit per channel color depth
 			img_info* img_info_pointer = new img_info;
 			img_info_pointer->height = arr.at(i + 5) << 8 | arr.at(i + 6);
@@ -116,15 +120,20 @@ img_info* get_frame_info(std::array<unsigned char, img_data_len>& arr) {
 				i += 3;
 			}
 
-			// Create MCU Array
+			// Create MCU array
 			if (((img_info_pointer->height * img_info_pointer->width) / 64) > 0xFFFFFFFFFFFFFFFF) {
 				print("Too many mcus to keep track of in a uint64");
 				return nullptr;
 			}
 
-			for (uint64_t j = 0; j < (img_info_pointer->height * img_info_pointer->width) / 64; j++) {
-				mcu_container* mcu_pointer = new mcu_container;
-				img_info_pointer->mcu_vector.push_back(mcu_pointer);
+			// Create MCU array for each component
+			for (uint8_t i = 0; i < img_info_pointer->number_of_components; i++) {
+				vector<struct mcu_container*> mcu_per_component;
+				for (uint64_t j = 0; j < (img_info_pointer->height * img_info_pointer->width) / 64; j++) {
+					mcu_container* mcu_pointer = new mcu_container;
+					mcu_per_component.push_back(mcu_pointer);
+				}
+				img_info_pointer->mcu_vector.push_back(mcu_per_component);
 			}
 
 			return img_info_pointer;
@@ -142,7 +151,7 @@ img_info* get_huffman_tables(std::array<unsigned char, img_data_len>& arr, img_i
 	} else {
 		//print("Number of Huffman tables found: " << static_cast<int>(num_of_huffman_tables));
 		uint8_t instance_counter = 0;
-		for (unsigned int i = 0; i < arr.size() - 1; i++) {
+		for (uint64_t i = 0; i < arr.size() - 1; i++) {
 			if (((arr.at(i) << 8) | arr.at(i + 1)) == (0xff << 8 | DHT)) { // Loop over each huffman table
 				//Get the raw table values
 				huffman_hashmap_container* huffman_hashmap_container_pointer = new huffman_hashmap_container;
@@ -195,8 +204,82 @@ img_info* get_huffman_tables(std::array<unsigned char, img_data_len>& arr, img_i
 	return nullptr;
 }
 
+img_info* decode_start_of_scan(std::array<unsigned char, img_data_len>& arr, img_info* img_info_pointer) {
+	uint8_t num_of_scans = count_instances(img_data, 0xff00 | SOS);
+
+	if (num_of_scans == 0) {
+		print("No Scan data found");
+		return nullptr;
+	} else {
+		print("Number of Scans found: " << static_cast<int>(num_of_scans));
+		for (uint64_t i = 0; i < arr.size() - 1; i++) { // Go through the immage searching for scans
+			if (((arr.at(i) << 8) | arr.at(i + 1)) == (0xff << 8 | SOS)) { // If valid scan found
+				uint16_t length_of_scan_header = (arr.at(i + 2) << 8) | arr.at(i + 3); // Length of scan header
+				const uint8_t number_of_componens_in_scan = arr.at(i + 4);
+				uint64_t start_of_scan_bit_stream = i + length_of_scan_header + 2;
+				if (number_of_componens_in_scan != img_info_pointer->number_of_components) {
+					print("Components mismatch");
+					return nullptr;
+				}
+				i += 5; // Place i to the starting position of scan's component info
+
+				vector<struct scan_components_info_and_order_container*> scan_components_info_and_order;
+				return 0;
+				/*
+				//Get the raw table values
+				huffman_hashmap_container* huffman_hashmap_container_pointer = new huffman_hashmap_container;
+				huffman_hashmap_container_pointer->huffman_class = arr.at(i + 4) >> 4; // Class
+				huffman_hashmap_container_pointer->huffman_destination = arr.at(i + 4) & 0x0f; // Destination
+
+				uint16_t length = arr.at(i + 2) << 8 | arr.at(i + 3); // Length of huffman table
+				uint16_t elements_count = 0;
+				vector<uint8_t> code_length;
+				vector<uint8_t> elements;
+
+				print("Table " << (int)instance_counter + 1 << ":");
+				for (uint16_t j = i + 5; j < 2 + i + length; j++) { // Loop over the Huffman tables contents
+					if ((j - (i + 4)) < 16) {
+						elements_count += static_cast<int>(img_data.at(j));
+						code_length.push_back(img_data.at(j));
+					} else {
+						elements.push_back(img_data.at(j));
+					}
+				}
+				//cout << endl << (int)elements_count << endl;
+				instance_counter++;
+
+
+				//Get the codes using canonical huffman encoding and store them in a hashmap
+				uint8_t elements_index = 1;
+				uint16_t code = 0x00;
+				for (uint8_t j = 0; j < 16; j++) { //loop over the 16 elements in vector length
+					while (code_length[j] > 0) {
+						huffman_hashmap_container_pointer->huffman_hashmap[code] = elements[elements_index];
+						code = code + 1;
+						code_length[j]--;
+						elements_index++;
+						elements_count--;
+					}
+					code = code << 1;
+				}
+
+				if (elements_count != 0) {
+					print("Error while combining length and elements");
+					return nullptr;
+				}
+
+				//Add the new huffman_hashmap_container_pointer to the main img pointer
+				img_info_pointer->huffman_vector.push_back(huffman_hashmap_container_pointer);
+				*/
+			}
+		}
+		return img_info_pointer;
+	}
+	return nullptr;
+}
+
 uint64_t get_start_of_byte_stream(std::array<unsigned char, img_data_len>& arr) {
-	for (unsigned int i = 0; i < arr.size(); i++) {
+	for (uint64_t i = 0; i < arr.size(); i++) {
 		if (arr.at(i) == (0xffda >> 8) && arr.at(i + 1) == (0xffda & 0xff)) {
 			return  i + 2 + (arr.at(i + 2) << 8 | arr.at(i + 3)); // index immedeately after tag, Height, Width
 		}
@@ -268,8 +351,35 @@ int main(void) {
 			}
 		}
 	}
-	uint16_t x = 0b0000000000000110;
-	print(static_cast<int>(get_symbol_from_huffman_map(img_info->huffman_vector[0]->huffman_hashmap, x)));
+	//uint16_t x = 0b0000000000000010;
+	//print(static_cast<int>(get_symbol_from_huffman_map(img_info->huffman_vector[1]->huffman_hashmap, x)));
+
+	//Decode Start of scans
+	img_info = decode_start_of_scan(img_data, img_info);
+
+	if (img_info == nullptr) {
+		print("Error decoding MCUs");
+		return 1;
+	}
+
+	/*
+		//Debuging
+		{
+			print("Number of Huffman tables: " << static_cast<int>(img_info->huffman_vector.size()));
+			for (uint8_t i = 0; i < (uint8_t)img_info->huffman_vector.size(); i++) {
+				print("Table: " << static_cast<int>(i));
+				print("Huffman class: " << static_cast<int>(img_info->huffman_vector[i]->huffman_class));
+				print("Huffman destination: " << static_cast<int>(img_info->huffman_vector[i]->huffman_destination));
+
+				//Output the generated codes
+				for (const auto& pair : img_info->huffman_vector[i]->huffman_hashmap) {
+					std::cout << "Key: " << bitset<16>(pair.first) << ", Value: " << static_cast<int>(pair.second) << std::endl;
+				}
+			}
+		}
+	*/
+
+
 	/*
 	uint8_t num_of_huffman_tables = count_instances(img_data, 0xffc4);
 	print("Number of Huffman tables found: " << static_cast<int>(num_of_huffman_tables));
