@@ -17,10 +17,10 @@ vector<vector<uint8_t>> quantization_tables;
 //vector<int> huffman_tables;
 int8_t bit_index = 7;
 uint64_t byte_index = 0;
-uint8_t temporay_stream_length = 0;
+
 
 struct mcu_container {
-	uint8_t values[64] = { 0 };
+	int8_t values[64] = { 0 };
 };
 
 struct components_info_container {
@@ -42,11 +42,17 @@ struct huffman_hashmap_container {
 	unordered_map<uint16_t, tuple<uint8_t, uint8_t>> huffman_hashmap;
 };
 
+struct quantization_table_container {
+	uint8_t quantization_table_destination = 0;
+	uint8_t values[64] = { 0 };
+};
+
 struct img_info {
 	uint16_t height = 0;
 	uint16_t width = 0;
 	uint16_t number_of_mcus_per_channel = 0;
 	uint8_t number_of_components = 0;
+	vector<struct quantization_table_container*> quantization_table_vector;
 	vector<struct components_info_container*> components_info_vector; //component number, width subsampling, height subsampling, destination
 	vector<vector<struct mcu_container*>> mcu_vector;
 	vector<struct huffman_hashmap_container*> huffman_vector;
@@ -101,20 +107,6 @@ tuple<uint8_t, uint8_t> get_symbol_from_huffman_map(unordered_map<uint16_t, tupl
 	return make_tuple(0xff, 0xff);
 }
 
-
-tuple<uint8_t, uint16_t, uint8_t> find_quantization_table_position_info(std::array<unsigned char, img_data_len>& arr, unsigned int instance = 0) {
-	unsigned int instance_counter = 0;
-	for (uint64_t i = 0; i < arr.size(); i++) {
-		if (arr.at(i) == (0xffdb >> 8) && arr.at(i + 1) == (0xffdb & 0xff)) {
-			if (instance_counter >= instance) {
-				return { i + 2, arr.at(i + 2) << 8 | arr.at(i + 3), arr.at(i + 4) }; // index immedeately after tag, length, destination (luma or chroma)
-			}
-			instance_counter++;
-		}
-	}
-	return { -1, -1 , -1 };
-}
-
 img_info* get_frame_info(std::array<unsigned char, img_data_len>& arr) {
 	for (uint64_t i = 0; i < arr.size(); i++) { // Parse file
 		if (((arr.at(i) << 8) | arr.at(i + 1)) == ((0xff << 8) | SOF0) && arr.at(i + 4) == (0x08)) { // Check if header is found and the image is of 8 bit per channel color depth
@@ -145,13 +137,12 @@ img_info* get_frame_info(std::array<unsigned char, img_data_len>& arr) {
 			// Create MCU array for each component
 			for (uint8_t k = 0; k < img_info_pointer->number_of_components; k++) {
 				vector<struct mcu_container*> mcu_per_component;
-				for (uint64_t j = 0; j < (img_info_pointer->height * img_info_pointer->width) / 64; j++) {
+				for (uint64_t j = 0; j < img_info_pointer->number_of_mcus_per_channel; j++) {
 					mcu_container* mcu_pointer = new mcu_container;
 					mcu_per_component.push_back(mcu_pointer);
 				}
 				img_info_pointer->mcu_vector.push_back(mcu_per_component);
 			}
-
 			return img_info_pointer;
 		}
 	}
@@ -219,6 +210,33 @@ img_info* get_huffman_tables(std::array<unsigned char, img_data_len>& arr, img_i
 	return nullptr;
 }
 
+img_info* get_quantization_tables(std::array<unsigned char, img_data_len>& arr, img_info* img_info_pointer) {
+	uint8_t num_of_quantization_tables = count_instances(img_data, 0xff00 | DQT);
+
+	if (num_of_quantization_tables == 0) {
+		print("No Quantization tables found");
+		return nullptr;
+	} else {
+		print("Number of Quantization found: " << static_cast<int>(num_of_quantization_tables));
+		for (uint64_t i = 0; i < arr.size() - 1; i++) { // Go through the immage searching for scans
+			if (((arr.at(i) << 8) | arr.at(i + 1)) == (0xff << 8 | DQT)) { // If valid scan found
+				quantization_table_container* quantization_table_container_pointer = new quantization_table_container;
+				//Get Quantization Tables
+				quantization_table_container_pointer->quantization_table_destination = arr.at(i + 4);
+				i += 5;
+
+				// Loop over the quantization tables contents
+				for (uint8_t j = 0; j < 64; j++) {
+					quantization_table_container_pointer->values[j] = arr.at(i + j);
+				}
+				img_info_pointer->quantization_table_vector.push_back(quantization_table_container_pointer);
+			}
+		}
+		return img_info_pointer;
+	}
+	return nullptr;
+}
+
 img_info* decode_start_of_scan(std::array<unsigned char, img_data_len>& arr, img_info* img_info_pointer) {
 	uint8_t num_of_scans = count_instances(img_data, 0xff00 | SOS);
 
@@ -263,110 +281,158 @@ img_info* decode_start_of_scan(std::array<unsigned char, img_data_len>& arr, img
 
 				byte_index = start_of_scan_bit_stream;
 
-				uint8_t current_component = 0; // Well need to increment this in the loop to get all the components one after the other
 
-				// Get the destination id of the huffman table for the channel
-				uint8_t component_destination_for_huffman = img_info_pointer->components_info_vector[scan_components_info_and_order[current_component]->mcu_order - 1]->component_destination;
-				print((int)component_destination_for_huffman);
+				//Loop for every 8x8 segment across all channels
+				for (uint64_t mcu_index = 0; mcu_index < img_info_pointer->number_of_mcus_per_channel; mcu_index++) {
+					uint8_t current_component = 0; // Well need to increment this in the loop to get all the components one after the other
+					//print((int)component_destination_for_huffman);
 
-				unordered_map<uint16_t, tuple<uint8_t, uint8_t>>* DC;
-				unordered_map<uint16_t, tuple<uint8_t, uint8_t>>* AC;
+					// For each component
+					for (current_component = 0; current_component < number_of_componens_in_scan; current_component++) {
+						//print(" ------------------------> " << (int)current_component);
+						// Get the destination id of the huffman table for the channel
+						uint8_t component_destination_for_huffman = img_info_pointer->components_info_vector[scan_components_info_and_order[current_component]->mcu_order - 1]->component_destination;
 
-				for (uint8_t j = 0; j < img_info_pointer->huffman_vector.size(); j++) {
-					if (img_info_pointer->huffman_vector[j]->huffman_destination == component_destination_for_huffman && img_info_pointer->huffman_vector[j]->huffman_class == 0) {
-						print("DC Found");
-						DC = &img_info_pointer->huffman_vector.at(j)->huffman_hashmap;
-					}
+						unordered_map<uint16_t, tuple<uint8_t, uint8_t>>* DC;
+						unordered_map<uint16_t, tuple<uint8_t, uint8_t>>* AC;
+						quantization_table_container* quant;
 
-					if (img_info_pointer->huffman_vector[j]->huffman_destination == component_destination_for_huffman && img_info_pointer->huffman_vector[j]->huffman_class == 1) {
-						print("AC Found");
-						AC = &img_info_pointer->huffman_vector.at(j)->huffman_hashmap;
+						// Get appropriate huffman tables
+						for (uint8_t j = 0; j < img_info_pointer->huffman_vector.size(); j++) {
+							if (img_info_pointer->huffman_vector[j]->huffman_destination == component_destination_for_huffman && img_info_pointer->huffman_vector[j]->huffman_class == 0) {
+								print("DC Matched: " << (int)j);
+								DC = &img_info_pointer->huffman_vector.at(j)->huffman_hashmap;
+							}
+
+							if (img_info_pointer->huffman_vector[j]->huffman_destination == component_destination_for_huffman && img_info_pointer->huffman_vector[j]->huffman_class == 1) {
+								print("AC Matched: " << (int)j);
+								AC = &img_info_pointer->huffman_vector.at(j)->huffman_hashmap;
+							}
+						}
+
+						// Get appropriate quantization table
+						for (uint8_t j = 0; j < img_info_pointer->quantization_table_vector.size(); j++) {
+							if (img_info_pointer->quantization_table_vector[j]->quantization_table_destination == component_destination_for_huffman) {
+								print("Quantization table Matched: " << (int)j);
+								quant = img_info_pointer->quantization_table_vector.at(j);
+							}
+
+						}
+
+
+						// Get DC length
+						uint16_t temporay_stream_containter = 0;
+						uint8_t temporay_stream_length = 0;
+						uint8_t length_dc = 0;
+
+						for (uint8_t j = 0; j < 8; j++) {
+							temporay_stream_containter = (temporay_stream_containter << 1) | (get_next_bit_from_stream(img_data));
+							temporay_stream_length += 1;
+							length_dc = get<0>(get_symbol_from_huffman_map(*DC, temporay_stream_containter, temporay_stream_length));
+							//print(bitset<16>(temporay_stream_containter) << " " << (int)length_dc);
+							if (length_dc != 0xff) {
+								break;
+							}
+							if (j == 8) {
+								print("Error reading the length of the DC coeff")
+									return nullptr;
+							}
+						}
+
+						if (length_dc > 11) {
+							print("Error - DC coefficient length greater than 11");
+							return nullptr;
+						}
+
+						//Get DC value
+						temporay_stream_containter = 0;
+						temporay_stream_length = 0;
+						int16_t value_dc = 0;
+
+						for (uint8_t j = 0; j < 8; j++) {
+							temporay_stream_containter = (temporay_stream_containter << 1) | (get_next_bit_from_stream(img_data));
+							temporay_stream_length += 1;
+							value_dc = get<0>(get_symbol_from_huffman_map(*DC, temporay_stream_containter, temporay_stream_length));
+							//print(bitset<16>(temporay_stream_containter) << " " << (int)value_dc);
+							if (value_dc != 0xff) {
+								break;
+							}
+							if (j == 8) {
+								print("Error reading the value of the DC coeff")
+									return nullptr;
+							}
+						}
+
+						if (length_dc != 0 && value_dc < (1 << (length_dc - 1))) {
+							value_dc -= (1 << length_dc) - 1;
+						}
+
+						img_info_pointer->mcu_vector[current_component][mcu_index]->values[zigZagMap[0]] = value_dc;
+
+						for (uint8_t mcu_coefficent_index = 1; mcu_coefficent_index < 64; ++mcu_coefficent_index) {
+							//print("HERE     : " << (int)mcu_coefficent_index);
+							// Get DC length
+							temporay_stream_containter = 0;
+							temporay_stream_length = 0;
+							uint8_t symbol_ac = 0;
+
+							for (uint8_t j = 0; j < 8; j++) {
+								temporay_stream_containter = (temporay_stream_containter << 1) | (get_next_bit_from_stream(img_data));
+								temporay_stream_length += 1;
+								symbol_ac = get<0>(get_symbol_from_huffman_map(*AC, temporay_stream_containter, temporay_stream_length));
+								//print(bitset<16>(temporay_stream_containter) << " " << (int)symbol_ac);
+								if (symbol_ac != 0xff) {
+									break;
+								}
+								if (j == 8) {
+									print("Error reading the length of the AC coeff")
+										return nullptr;
+								}
+							}
+
+							if (symbol_ac == 0x00) {
+								print("All remaining values are 0"); // Debug
+								break;
+							}
+
+							uint8_t numZeroes = symbol_ac >> 4;
+							uint8_t coeffLength = symbol_ac & 0x0F;
+
+							if (mcu_coefficent_index + numZeroes >= 64) {
+								print("Zero run-length exceeded block componnt by: " << (int)numZeroes);
+								break; // Temporary fix, THIS basically IGNORES THE LAST AC VALUE
+								return nullptr;
+							}
+
+							mcu_coefficent_index += numZeroes;
+
+							if (coeffLength > 10) {
+								print("AC coefficient length greater than 10");
+								return nullptr;
+							}
+
+							int16_t coeff = 0;
+
+							for (size_t j = 0; j < coeffLength; j++) {
+								coeff = (coeff << 1) | (get_next_bit_from_stream(img_data));
+							}
+
+							if (coeff < (1 << (coeffLength - 1))) {
+								coeff -= (1 << coeffLength) - 1;
+							}
+
+							//print("coeff: " << (int)coeff);
+							img_info_pointer->mcu_vector[current_component][mcu_index]->values[zigZagMap[mcu_coefficent_index]] = coeff;
+						}
+
+						// Dequantize the coeffs
+
+						for (uint8_t j = 0; j < 64; j++) {
+							img_info_pointer->mcu_vector[current_component][mcu_index]->values[j] = img_info_pointer->mcu_vector[current_component][mcu_index]->values[j] * quant->values[j];
+						}
 					}
 				}
-
-				//uint16_t x = 0b000000000000000;
-				//print(static_cast<int>(get_symbol_from_huffman_map(*DC, x)));
-
-				// Get DC length
-				uint16_t temporay_stream_containter = 0;
-				temporay_stream_length = 0;
-				uint8_t length_dc = 0;
-
-				for (uint8_t i = 0; i < 8; i++) {
-					temporay_stream_containter = (temporay_stream_containter << 1) | (get_next_bit_from_stream(img_data));
-					temporay_stream_length += 1;
-					length_dc = get<0>(get_symbol_from_huffman_map(*DC, temporay_stream_containter, temporay_stream_length));
-					print(bitset<16>(temporay_stream_containter) << " " << (int)length_dc);
-					if (length_dc != 0xff) {
-						break;
-					}
-					if (i == 8) {
-						print("Error reading the length of the DC coeff")
-							return 0;
-					}
-				}
-
-				//Get DC value
-				temporay_stream_containter = 0;
-				temporay_stream_length = 0;
-				uint8_t value_dc = 0;
-				for (uint8_t i = 0; i < 8; i++) {
-					temporay_stream_containter = (temporay_stream_containter << 1) | (get_next_bit_from_stream(img_data));
-					temporay_stream_length += 1;
-					value_dc = get<0>(get_symbol_from_huffman_map(*DC, temporay_stream_containter, temporay_stream_length));
-					print(bitset<16>(temporay_stream_containter) << " " << (int)value_dc);
-					if (value_dc != 0xff) {
-						break;
-					}
-					if (i == 8) {
-						print("Error reading the value of the DC coeff")
-							return 0;
-					}
-				}
-
-				while (1) {
-					// Get DC length
-					temporay_stream_containter = 0;
-					temporay_stream_length = 0;
-					uint8_t length_ac = 0;
-					for (uint8_t i = 0; i < 8; i++) {
-						temporay_stream_containter = (temporay_stream_containter << 1) | (get_next_bit_from_stream(img_data));
-						temporay_stream_length += 1;
-						length_dc = get<0>(get_symbol_from_huffman_map(*AC, temporay_stream_containter, temporay_stream_length));
-						print(bitset<16>(temporay_stream_containter) << " " << (int)length_dc);
-						if (length_dc != 0xff) {
-							break;
-						}
-						if (i == 8) {
-							print("Error reading the length of the AC coeff")
-								return 0;
-						}
-					}
-
-					//Get DC value
-					temporay_stream_containter = 0;
-					temporay_stream_length = 0;
-					uint8_t value_ac = 0;
-					for (uint8_t i = 0; i < 8; i++) {
-						temporay_stream_containter = (temporay_stream_containter << 1) | (get_next_bit_from_stream(img_data));
-						temporay_stream_length += 1;
-						value_dc = get<0>(get_symbol_from_huffman_map(*AC, temporay_stream_containter, temporay_stream_length));
-						print(bitset<16>(temporay_stream_containter) << " " << (int)value_dc);
-						if (value_dc != 0xff) {
-							break;
-						}
-						if (i == 8) {
-							print("Error reading the value of the AC coeff")
-								return 0;
-						}
-					}
-				}
-				return 0;
 			}
-			/*scan_components_info_and_order[current_component]->dc_table_id
-				while (get_symbol_from_huffman_map())
-					temporay_stream_containter =
-*/
 		}
 		return img_info_pointer;
 	}
@@ -430,8 +496,30 @@ int main(void) {
 			}
 		}
 	}
-	//uint16_t x = 0b0000000000000010;
-	//print(static_cast<int>(get_symbol_from_huffman_map(img_info->huffman_vector[1]->huffman_hashmap, x)));
+
+	//Get quantization tables
+	img_info = get_quantization_tables(img_data, img_info);
+
+	if (img_info == nullptr) {
+		print("Error getting quantization tables");
+		return 1;
+	}
+
+	//Debuging
+	{
+		for (auto container : img_info->quantization_table_vector) {
+
+			print("Quantization table " << (int)container->quantization_table_destination << " contents below:");
+			for (uint16_t j = 0; j < 64; ++j) {
+				if (j % 8 == 0) {
+					cout << endl;
+				}
+				std::cout << static_cast<int>(container->values[j]) << " ";
+			}
+			cout << endl << endl;
+		}
+	}
+
 
 	//Decode Start of scans
 	img_info = decode_start_of_scan(img_data, img_info);
@@ -441,231 +529,23 @@ int main(void) {
 		return 1;
 	}
 
-	/*
-		//Debuging
-		{
-			print("Number of Huffman tables: " << static_cast<int>(img_info->huffman_vector.size()));
-			for (uint8_t i = 0; i < (uint8_t)img_info->huffman_vector.size(); i++) {
-				print("Table: " << static_cast<int>(i));
-				print("Huffman class: " << static_cast<int>(img_info->huffman_vector[i]->huffman_class));
-				print("Huffman destination: " << static_cast<int>(img_info->huffman_vector[i]->huffman_destination));
-
-				//Output the generated codes
-				for (const auto& pair : img_info->huffman_vector[i]->huffman_hashmap) {
-					std::cout << "Key: " << bitset<16>(pair.first) << ", Value: " << static_cast<int>(pair.second) << std::endl;
+	//Debuging
+	{
+		for (auto component : img_info->mcu_vector) {
+			int j = 0;
+			for (auto mcus_containers : component) {
+				//print(endl << "MCU " << j);
+				cout << "[";
+				j++;
+				for (auto a : mcus_containers->values) {
+					cout << (signed short)a << " ,";
 				}
+				cout << "],";
+
 			}
-		}
-	*/
-
-
-	/*
-	uint8_t num_of_huffman_tables = count_instances(img_data, 0xffc4);
-	print("Number of Huffman tables found: " << static_cast<int>(num_of_huffman_tables));
-
-		if (num_of_quantization_tables <= 0) {
-			print("No Huffman tables found");
-			return 1;
-		} else {
-			for (uint8_t i = 0; i < num_of_huffman_tables; i++) {
-				print("Huffman table number: " << static_cast<int>(i));
-				auto data = find_huffman_table_position_info(img_data, i);
-				print("Index: " << static_cast<int>(get<0>(data)));
-				print("Length: " << get<1>(data));
-				print("Class: " << static_cast<int>(get<2>(data)));
-				print("Destination: " << static_cast<int>(get<3>(data)));
-				print("Huffman table contents below:");
-				uint16_t elements_count = 0;
-
-				vector<uint8_t> length;
-				vector<uint8_t> elements;
-				unordered_map<uint16_t, tuple<uint8_t, uint8_t>> huffman_codes_map; // Code, Data, Code Length
-
-				for (uint16_t i = get<0>(data) + 3; i < get<0>(data) + get<1>(data); i++) { // Loop over the Huffman tables contents
-					if ((i - (get<0>(data) + 3)) < 16) {
-						cout << static_cast<int>(img_data.at(i)) << " ";
-						elements_count += static_cast<int>(img_data.at(i));
-						length.push_back(img_data.at(i));
-					} else {
-						cout << static_cast<int>(img_data.at(i)) << " ";
-						elements.push_back(img_data.at(i));
-					}
-				}
-
-				cout << endl;
-				print("Number of elements: " << static_cast<int>(elements_count));
-				cout << endl;
-
-				//Get the codes using canonical huffman encoding and store them in a hashmap
-				uint8_t elements_index = 0;
-				uint16_t code = 0x00;
-				uint16_t elements_count_copy = elements_count;
-				for (uint8_t i = 0; i < 16; i++) { //loop over the 16 elements in vector length
-					while (length[i] > 0) {
-						huffman_codes_map[code] = make_tuple(elements[elements_index], i + 1);
-						print(static_cast<int>(i + 1) << " " << static_cast<int>(elements[elements_index]));
-						code = code + 1;
-						length[i]--;
-						elements_index++;
-						elements_count--;
-					}
-					code = code << 1;
-				}
-
-				if (elements_count != 0) {
-					print("Error while combining length and elements");
-					return 1;
-				}
-
-				if (elements_count_copy != huffman_codes_map.size()) {
-					print("Map size dosent match the number of elements");
-					return 1;
-				}
-
-				//Ouptput the generated codes
-				for (const auto& pair : huffman_codes_map) {
-					std::cout << "Key: " << bitset<16>(pair.first) << ", Value: " << static_cast<int>(get<0>(pair.second)) << ", Length: " << static_cast<int>(get<1>(pair.second)) << std::endl;
-				}
-				huffman_tables.push_back(huffman_codes_map);
-			}
-			cout << endl;
-		}
-	*/
-
-	/*
-	//Get Quantization Tables
-	uint8_t num_of_quantization_tables = count_instances(img_data, 0xffdb);
-	print("Number of Quantization tables found: " << static_cast<int>(num_of_quantization_tables));
-
-	if (num_of_quantization_tables <= 0) {
-		print("No Quantization tables found");
-		return 1;
-	} else {
-		for (uint8_t i = 0; i < num_of_quantization_tables; i++) {
-			print("Quantization table number: " << static_cast<int>(i));
-			auto data = find_quantization_table_position_info(img_data, i);
-			print("Index: " << static_cast<int>(get<0>(data)));
-			print("Length: " << get<1>(data));
-			print("Destination: " << static_cast<int>(get<2>(data)));
-
-			vector<uint8_t> quantization_table_values;
-			for (uint16_t i = get<0>(data) + 3; i < get<0>(data) + get<1>(data); i++) { // Loop over the quantization tables contents
-				quantization_table_values.push_back(img_data.at(i));
-			}
-			quantization_tables.push_back(quantization_table_values);
-		}
-		cout << endl;
-
-		for (uint16_t i = 0; i < quantization_tables.size(); ++i) {
-			print("Quantization table " << static_cast<int>(i) << " contents below:");
-			for (uint16_t j = 0; j < quantization_tables[i].size(); ++j) {
-				if (j % 8 == 0) {
-					cout << endl;
-				}
-				std::cout << static_cast<int>(quantization_tables[i][j]) << " ";
-			}
-			cout << endl;
-			cout << endl;
 		}
 	}
 
-
-
-	//Get Frame Height and Width
-	auto frame_info = find_start_of_frame_info(img_data);
-	print("Frame Height: " << static_cast<int>(get<1>(frame_info)));
-	print("Frame Width: " << static_cast<int>(get<2>(frame_info)));
-
-
-	uint64_t start_of_byte_stream_address = get_start_of_byte_stream(img_data);
-	print(start_of_byte_stream_address);
-	byte_index = start_of_byte_stream_address;
-
-	uint16_t stream_temporary_container = 0;
-	uint8_t length = 0;
-	for (uint8_t i = 0; i < 8; i++) {
-		stream_temporary_container = (stream_temporary_container << 1) | (get_next_bit_from_stream(img_data));
-		length = get_symbol_from_huffman_map(huffman_tables[0], stream_temporary_container);
-		print(bitset<16>(stream_temporary_container) << " " << (int)length);
-		if (length != 0xff) {
-			break;
-		}
-		if (i == 8) {
-			print("Error reading the length of the DC coeff")
-				return 1;
-		}
-	}
-
-	stream_temporary_container = 0;
-	for (uint8_t i = 0; i < length; i++) {
-		stream_temporary_container = (stream_temporary_container << 1) | (get_next_bit_from_stream(img_data));
-	}
-
-	int8_t coefficent = (stream_temporary_container);
-
-	if (coefficent < (1 << (length - 1))) {
-		coefficent -= (1 << length) - 1;
-	}
-
-	print("DC coeff: " << (int)coefficent);
-
-
-	for (uint i = 1; i < 64; ++i) {
-		length = 0;
-		for (uint8_t i = 0; i < 8; i++) {
-			stream_temporary_container = (stream_temporary_container << 1) | (get_next_bit_from_stream(img_data));
-			length = get_symbol_from_huffman_map(huffman_tables[1], stream_temporary_container);
-			print(bitset<16>(stream_temporary_container) << " " << (int)length);
-			if (length != 0xff) {
-				break;
-			}
-			if (i == 8) {
-				print("Error reading the length of the AC coeff")
-					return 1;
-			}
-		}
-
-		// symbol 0x00 means fill remainder of component with 0
-		if (length == 0x00) {
-			print("All Zeros Ahead");
-			return true;
-		}
-
-		// otherwise, read next component coefficient
-		uint8_t numZeroes = length >> 4;
-		uint8_t coeffLength = length & 0x0F;
-		coefficent = 0;
-
-		if (i + numZeroes >= 64) {
-			std::cout << "Error - Zero run-length exceeded block component\n";
-			return false;
-		}
-		i += numZeroes;
-
-		if (coeffLength > 10) {
-			std::cout << "Error - AC coefficient length greater than 10\n";
-			return false;
-		}
-
-		for (uint8_t i = 0; i < 8; i++) {
-			stream_temporary_container = (stream_temporary_container << 1) | (get_next_bit_from_stream(img_data));
-			length = get_symbol_from_huffman_map(huffman_tables[1], stream_temporary_container);
-			print(bitset<16>(stream_temporary_container) << " " << (int)length);
-			if (length != 0xff) {
-				break;
-			}
-			if (i == 8) {
-				print("Error reading the length of the AC coeff")
-					return 1;
-			}
-		}
-
-		if (length < (1 << (coeffLength - 1))) {
-			length -= (1 << coeffLength) - 1;
-		}
-		print((uint)zigZagMap[i] << " " << length);
-	}
-	*/
 	return 0;
 }
 

@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -Wall -Wextra -Werror -g
+CXXFLAGS = -g
 
 all: decoder
 
