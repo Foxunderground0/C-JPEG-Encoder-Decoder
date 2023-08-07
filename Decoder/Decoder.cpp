@@ -187,6 +187,7 @@ img_info* get_huffman_tables(std::array<unsigned char, img_data_len>& arr, img_i
 				uint16_t code = 0x00;
 				for (uint8_t j = 0; j < 16; j++) { //loop over the 16 elements in vector length
 					while (code_length[j] > 0) {
+						print(bitset<16>(code));
 						huffman_hashmap_container_pointer->huffman_hashmap[code] = make_tuple(elements[elements_index], j + 1);
 						code = code + 1;
 						code_length[j]--;
@@ -428,8 +429,10 @@ img_info* decode_start_of_scan(std::array<unsigned char, img_data_len>& arr, img
 						// Dequantize the coeffs
 
 						for (uint8_t j = 0; j < 64; j++) {
+							cout << (int)img_info_pointer->mcu_vector[current_component][mcu_index]->values[zigZagMap[j]] << ", ";
 							img_info_pointer->mcu_vector[current_component][mcu_index]->values[j] = img_info_pointer->mcu_vector[current_component][mcu_index]->values[j] * quant->values[j];
 						}
+						cout << endl << endl << endl;
 					}
 				}
 			}

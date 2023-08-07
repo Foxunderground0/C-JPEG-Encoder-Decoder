@@ -1,60 +1,62 @@
 import numpy as np
-import jpegio as jio
 import matplotlib.pyplot as plt
 from scipy.fftpack import idct
+from scipy.signal import convolve2d
 
 
-def inverse_dct_2d(block):
-    # Perform 2D inverse DCT on an 8x8 block
-    return np.round(idct(idct(block.T, norm='ortho').T, norm='ortho'))
+def zigzag_decode(coefficients):
+    # Zigzag pattern for reordering coefficients
+    zigzag_pattern = np.array([
+        [0,  1,  2,  3, 4, 5, 6, 7],
+        [8,  9,  10, 11, 12, 13, 14, 15],
+        [16,  17, 18, 19, 20, 21, 22, 23],
+        [24, 25, 26, 27, 28, 29, 30, 31],
+        [32, 33, 34, 35, 36, 37, 38, 39],
+        [40, 41, 42, 43, 44, 45, 46, 47],
+        [48, 49, 50, 51, 52, 53, 54, 55],
+        [56, 57, 58, 59, 60, 61, 62, 63]
+    ])
+
+    # Create an empty 8x8 block
+    block = np.zeros((8, 8), dtype=int)
+
+    # Fill the block with coefficients in zigzag pattern
+    for index, pos in enumerate(np.ndindex(8, 8)):
+        block[pos] = coefficients[zigzag_pattern[pos]]
+
+    return block
 
 
-def reconstruct_image(coefficients, mcu_width):
-    # Calculate the image width and height in pixels
-    image_width = mcu_width * len(coefficients[0])
-    image_height = mcu_width * len(coefficients)
-
-    # Create an empty image to store the pixel values
-    image = np.zeros((image_height, image_width))
-
-    # Iterate over each MCU and apply inverse DCT to reconstruct the image
-    for mcu_index, mcu in enumerate(coefficients):
-        mcu_row = mcu_index // (image_width // mcu_width)
-        mcu_col = mcu_index % (image_width // mcu_width)
-
-        mcu_pixels = inverse_dct_2d(
-            np.array(mcu).reshape((mcu_width, mcu_width)))
-        image[mcu_row*mcu_width:(mcu_row+1)*mcu_width, mcu_col *
-              mcu_width:(mcu_col+1)*mcu_width] = mcu_pixels
-
-    return image
+def inverse_dct_2d(coefficients):
+    return idct(idct(coefficients, norm='ortho').T, norm='ortho').T
 
 
-def main():
-    # Replace with the path to your image
-    mcu_width = 8
-
-    # Assuming you have already extracted the quantized coefficients
-    # For this example, I'll use the coefficients you provided
-    coefficients = [
-        [276, 42, 117, 9, 39, 12, 20, 0, 272, 11, 183, -70, 41, 5, -5, 2, 9, 242, 9, -7, -64, -23, -5, -9, -34, -229, 26, 25, -73, 19, 2, -13, -71,
-            106, -80, -62, 25, 17, 15, -2, -16, -57, -89, 38, 4, -22, 18, -11, 39, -26, -71, 71, 18, -1, -11, -11, -80, -105, -21, 29, 30, -1, -16, 27],
-        [-1, 29, -17, 8, -2, -7, -3, 4, 25, -11, -40, -10, 6, 1, -2, -3, 40, -19, -13, 19, -15, -1, 6, 11, -15, -3, -12, -13, 7, 5, -
-            2, -5, -8, -5, 2, 9, -4, 2, 0, -3, -9, -20, -5, 10, 4, 4, 0, -3, 7, -2, 0, 4, -7, 2, 0, -4, 13, 5, -12, -7, 1, -1, 0, -2],
-        [258, 68, 24, 53, 66, 6, 5, 7, 258, -146, 71, -64, 62, 22, -10, 7, 4, -218, -48, 36, 55, 18, 19, 1, -84, 192, 30, -58, 67, -4, -21, 4,
-            95, -25, -58, -50, -1, 22, 15, 15, 79, 68, -50, 8, 16, -24, -2, 5, 0, -17, 60, -21, -30, 3, 2, 15, -4, 19, 18, 30, -11, -11, 13, -6],
-        [68, -32, -10, 26, -8, -5, -3, -11, 45, 58, -2, -27, -17, 0, 8, -9, -53, 65, -26, 0, 9, -2, -3, -5, -52, -34, -27, -19, 3, 2,
-            6, 6, -4, -13, 20, -11, 1, 2, 1, 2, -6, 3, 12, 19, 10, -3, 1, 2, -3, -4, -1, 1, 11, -5, -2, 4, 11, 6, -3, 0, 0, 1, 3, -5]
-    ]
-
-    # Reconstruct the image
-    reconstructed_image = reconstruct_image(coefficients, mcu_width)
-
-    # Display the resulting image
-    plt.imshow(reconstructed_image, cmap='gray')
+def display_image(image):
+    im = plt.imshow(image, cmap='gray')
+    plt.colorbar(im)
     plt.axis('off')
     plt.show()
 
 
+'''
+                        0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0
+'''
+
 if __name__ == "__main__":
-    main()
+    # Replace this with your 8x8 array of DCT coefficients (in zigzag pattern)
+    dct_coefficients = [-3, 18, -90, -32, 0, 24, 24, -18, 74, 0, -11, 0, 57, 0, 60, 0, -36, -44, -84, 64, 80, -88, -12, 78, -45, 0, 90, 0, -20, 0, -
+                        27, 0, -125, 45, 0, -60, 76, 48, 0, -77, -52, 0, -49, 0, -91, 0, 126, 0, 13, -16, 48, 34, -48, -20, -36, 54, -76, 0, -128, 0, -45, 0, -112, 0]
+
+    block = zigzag_decode(dct_coefficients)
+    # Decode and inverse DCT transform
+    reconstructed_image = inverse_dct_2d(block)
+
+    # Display the image
+    display_image(reconstructed_image)
